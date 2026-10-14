@@ -3,12 +3,13 @@ from scipy.optimize import linprog
 import csv
 from datetime import datetime
 
+
 ## INPUTS
 
-inputBonds = "/Users/adamfee/Desktop/Math4820/ProjectOne/TreasuryPrices9Sep24.csv"
-inputCashFlows = "/Users/adamfee/Desktop/Math4820/ProjectOne/SingleCFShort.csv"
-outputPath = "/Users/adamfee/Desktop/Math4820/ProjectOne/test.csv"
-settlementDate = ql.Date(25, 9, 2024)
+inputBonds = "/Users/adamfee/Desktop/FNCE 4820/ProjectOne/TreasuryPrices9Sep24.csv"
+inputCashFlows = "/Users/adamfee/Desktop/FNCE 4820/ProjectOne/SingleCFLong.csv"
+outputPath = "/Users/adamfee/Desktop/FNCE 4820/ProjectOne/SingleCFLongOutput.csv"
+settlementDate = ql.Date(10, 9, 2024)
 
 
 
@@ -36,6 +37,29 @@ def bondCashFlows(settlementDate, maturityDate):
 
 
 
+## HELPER DATE FORMAT
+dateFormats = [
+    "%B %d, %Y",
+    "%m/%d/%Y",
+    "%m/%d/%y",
+    "%Y-%m-%d",
+    "%d-%b-%Y",
+    "%b %d, %Y",
+    "%d %B %Y",
+]
+
+def parseDate(text):
+    text = text.strip()
+    for format in dateFormats:
+        try:
+            d = datetime.strptime(text, format).date()
+            return ql.Date(d.day, d.month, d.year)
+        except ValueError:
+            continue
+    raise ValueError(f"unrecognized date format: {text!r}")
+    
+
+
 ## INPUT REQUIRED CASH FLOWS
 
 cashFlows = []
@@ -47,9 +71,8 @@ with open(inputCashFlows, newline="") as file:
 
         date, cashFlow = row
 
-        d = datetime.strptime(date.strip(), "%B %d, %Y").date()
         cashFlows.append({
-            "date": ql.Date(d.day, d.month, d.year),
+            "date": parseDate(date),
             "cashFlow": float(cashFlow.strip())
         })
 
@@ -68,9 +91,13 @@ with open(inputBonds, newline="") as file:
                                    "MARKET BASED NOTE",
                                    "MARKET BASED BOND"):
             continue
+
+        buy = float(row[5].strip())
+        if buy <= 0:
+            continue
         
-        d = datetime.strptime(row[3].strip(), "%m/%d/%Y").date()
-        maturityDate = ql.Date(d.day, d.month, d.year)
+        #d = datetime.strptime(row[3].strip(), "%m/%d/%Y").date()
+        maturityDate = parseDate(row[3])
         if maturityDate <= settlementDate or maturityDate > finalCashFlowDate:
             continue
 
@@ -90,6 +117,7 @@ with open(inputBonds, newline="") as file:
             "dirtyPrice": float(row[5].strip()) + float(bond.accruedAmount(settlementDate)),
             "flows": flows
         })
+
 
 
 ## MATRICES
@@ -120,7 +148,11 @@ result = linprog(c, A_ub=A, b_ub=b, method="highs")
 
 with open(outputPath, "w", newline="") as out:
     writer = csv.writer(out)
-    writer.writerow(["CUSIP", "Principal"])
+    totalCost = 0
+    writer.writerow(["CUSIP", "Maturity", "Principal", "Cost"])
     for bond, amount in zip(bonds, result.x):
         if (amount > 1e-6):
-            writer.writerow([bond["cusip"], round(amount, 2)])
+            writer.writerow([bond["cusip"], bond["maturityDate"], round(amount, 2), round(bond["dirtyPrice"] * amount / 100, 2)])
+            totalCost += round(bond["dirtyPrice"] * amount / 100, 2)
+
+    writer.writerow(["Total Cost:", round(totalCost, 2)])
